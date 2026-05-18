@@ -247,7 +247,7 @@ html = """
     </div>
 
     <script>
-        const ws = new WebSocket("ws://localhost:8000/ws");
+        const ws = new WebSocket("wss://chatbot-production-34b3.up.railway.app/ws");
 
         const messages = document.getElementById("messages");
         const input = document.getElementById("messageText");
