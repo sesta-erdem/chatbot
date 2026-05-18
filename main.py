@@ -2,7 +2,9 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import HTMLResponse
 import google.generativeai as genai
 
-genai.configure(api_key="AIzaSyDZWT13TbPG7qggmbh3Td46YIKWzdzISgk")
+import os
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 app = FastAPI()
 
