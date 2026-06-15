@@ -6,6 +6,8 @@
     <title>Chat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -161,6 +163,18 @@
             font-size: 13px;
             font-family: 'DM Mono', monospace;
         }
+
+        .bubble h1, .bubble h2, .bubble h3 { font-size: 1.1em; margin: 8px 0 4px; font-weight: 600; }
+        .bubble p { margin: 6px 0; }
+        .bubble p:first-child { margin-top: 0; }
+        .bubble p:last-child { margin-bottom: 0; }
+        .bubble ul, .bubble ol { margin: 6px 0; padding-left: 20px; }
+        .bubble li { margin: 2px 0; }
+        .bubble code { background: rgba(255,255,255,0.1); padding: 2px 5px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 0.9em; }
+        .bubble pre { background: rgba(255,255,255,0.06); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+        .bubble pre code { background: none; padding: 0; }
+        .bubble strong { font-weight: 600; }
+        .bubble a { color: var(--success); }
 
         .bubble.streaming::after {
             content: '▋';
@@ -364,7 +378,17 @@
     let activeBubble = null;
 
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(proto + "://" + window.location.host + "/ws");
+    const tokenStorageKey = "chat_access_token";
+    let accessToken = window.sessionStorage.getItem(tokenStorageKey);
+    if (!accessToken) {
+        accessToken = window.prompt("Access token") || "";
+        if (accessToken) {
+            window.sessionStorage.setItem(tokenStorageKey, accessToken);
+        }
+    }
+    const wsUrl = new URL(proto + "://" + window.location.host + "/ws");
+    wsUrl.searchParams.set("token", accessToken);
+    const ws = new WebSocket(wsUrl.toString());
 
     function setStatus(state) {
         dot.className = 'dot ' + state;
@@ -388,22 +412,37 @@
     ws.onerror = () => setStatus('off');
 
     ws.onmessage = (e) => {
-        const text = e.data;
-
-        if (text.startsWith('Hata oluştu')) {
-            finishActiveBubble();
-            appendBubble(text, 'in', true);
+        let msg;
+        try {
+            msg = JSON.parse(e.data);
+        } catch (err) {
+            console.error("Parse hatası:", e.data);
             return;
         }
 
-        if (!activeBubble) {
-            hideEmpty();
-            activeBubble = createBubble('in');
-            activeBubble.classList.add('streaming');
-        }
+        if (msg.type === "chunk") {
+            if (!activeBubble) {
+                hideEmpty();
+                activeBubble = createBubble('in');
+                activeBubble.classList.add('streaming');
+                activeBubble.dataset.raw = "";
+            }
+            activeBubble.dataset.raw += msg.content;
+            const dirty = marked.parse(activeBubble.dataset.raw);
+            activeBubble.innerHTML = DOMPurify.sanitize(dirty);
+            scrollDown();
 
-        activeBubble.textContent += text;
-        scrollDown();
+        } else if (msg.type === "done") {
+            finishActiveBubble();
+
+        } else if (msg.type === "error") {
+            finishActiveBubble();
+            appendBubble(msg.content, 'in', true);
+
+        } else if (msg.type === "system") {
+            finishActiveBubble();
+            appendBubble(msg.content, 'in', true);
+        }
     };
 
     function createBubble(dir, isError = false) {
@@ -468,7 +507,7 @@
         hideEmpty();
         appendBubble(text, 'out');
 
-        ws.send(text);
+        ws.send(JSON.stringify({ type: "user_message", content: text }));
 
         input.value = '';
         input.style.height = 'auto';
