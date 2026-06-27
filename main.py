@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     app_access_token: str
     allowed_origins: list[str]
+    history_window: int = 10  # modele gönderilecek maksimum turn sayısı (1 turn = 1 user + 1 model)
 
     @field_validator("gemini_api_key", mode="after")
     @classmethod
@@ -104,6 +105,25 @@ logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=settings.gemini_api_key)
 
+GENERATE_CONFIG = types.GenerateContentConfig(
+    system_instruction=(
+        "Sen sabırlı, deneyimli bir yazılım eğitmenisin. "
+        "Karmaşık konuları gündelik benzetmelerle anlatırsın.\n\n"
+        "Cevabının uzunluğunu ve biçimini soruya göre ayarla. "
+        "Selamlaşma, sohbet veya basit sorulara KISA ve doğal cevap ver — başlık, liste, "
+        "kod bloğu kullanma, sadece birkaç cümle yeter. "
+        "Yalnızca konu gerçekten teknik veya çok parçalıysa Markdown biçimlendirme "
+        "(başlık, kod bloğu, kalın vurgu) ve adım adım açıklama kullan.\n\n"
+        "Kullanıcı kod gönderirse önce ne yaptığını açıkla, sonra varsa hatayı göster, "
+        "en son iyileştirme öner.\n\n"
+        "Emin olmadığın bilgilerde tahmin yürütme; 'bundan emin değilim' de. "
+        "Kütüphane, fonksiyon veya sürüm adı uydurma. "
+        "Uydurma bir cevap vermektense 'bilmiyorum' demek daha iyidir."
+    ),
+    temperature=0.2,
+    max_output_tokens=3000,
+)
+
 app = FastAPI()
 
 templates = Jinja2Templates(directory="templates")
@@ -131,31 +151,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     message_timestamps: list[float] = []
+    history: list[types.Content] = []
 
     connection_id = str(uuid.uuid4())
     ws_logger = ConnectionLoggerAdapter(logger, {"connection_id": connection_id})
-
-    chat = client.aio.chats.create(
-        model=settings.gemini_model,
-        config=types.GenerateContentConfig(
-            system_instruction=(
-                "Sen sabırlı, deneyimli bir yazılım eğitmenisin. "
-                "Karmaşık konuları gündelik benzetmelerle anlatırsın.\n\n"
-                "Cevabının uzunluğunu ve biçimini soruya göre ayarla. "
-                "Selamlaşma, sohbet veya basit sorulara KISA ve doğal cevap ver — başlık, liste, "
-                "kod bloğu kullanma, sadece birkaç cümle yeter. "
-                "Yalnızca konu gerçekten teknik veya çok parçalıysa Markdown biçimlendirme "
-                "(başlık, kod bloğu, kalın vurgu) ve adım adım açıklama kullan.\n\n"
-                "Kullanıcı kod gönderirse önce ne yaptığını açıkla, sonra varsa hatayı göster, "
-                "en son iyileştirme öner.\n\n"
-                "Emin olmadığın bilgilerde tahmin yürütme; 'bundan emin değilim' de. "
-                "Kütüphane, fonksiyon veya sürüm adı uydurma. "
-                "Uydurma bir cevap vermektense 'bilmiyorum' demek daha iyidir."
-            ),
-            temperature=0.2,
-            max_output_tokens=3000,
-        ),
-    )
 
     try:
         ws_logger.info("Kullanıcı bağlandı")
@@ -195,12 +194,30 @@ async def websocket_endpoint(websocket: WebSocket):
             message_timestamps.append(now)
 
             try:
+                # Son history_window turn'ü al (1 turn = user + model = 2 Content)
+                windowed = history[-(settings.history_window * 2):]
+                turns_sent = len(windowed) // 2
+                ws_logger.info(f"Modele gönderilen turn sayısı: {turns_sent}")
+
+                contents = windowed + [
+                    types.Content(role="user", parts=[types.Part(text=data.strip())])
+                ]
+
+                full_response: list[str] = []
                 loop = asyncio.get_running_loop()
                 async with asyncio.timeout(IDLE_TIMEOUT) as timeout:
-                    async for chunk in await chat.send_message_stream(data.strip()):
+                    async for chunk in await client.aio.models.generate_content_stream(
+                        model=settings.gemini_model,
+                        contents=contents,
+                        config=GENERATE_CONFIG,
+                    ):
                         if chunk.text:
+                            full_response.append(chunk.text)
                             await websocket.send_json(ChunkMessage(content=chunk.text).model_dump())
                         timeout.reschedule(loop.time() + IDLE_TIMEOUT)
+
+                history.append(types.Content(role="user", parts=[types.Part(text=data.strip())]))
+                history.append(types.Content(role="model", parts=[types.Part(text="".join(full_response))]))
                 await websocket.send_json(DoneMessage().model_dump())
             except asyncio.TimeoutError:
                 ws_logger.warning("Gemini yanıt akışı durdu (idle timeout).")
