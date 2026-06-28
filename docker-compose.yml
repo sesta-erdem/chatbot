@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot
+      POSTGRES_DB: chatbot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy   # Postgres "hazır" olmadan app başlamasın
+    environment:
+      # Secret'lar host .env'inden interpolate edilir (imaja girmez).
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      APP_ACCESS_TOKEN: ${APP_ACCESS_TOKEN}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HISTORY_TOKEN_BUDGET: ${HISTORY_TOKEN_BUDGET:-4000}
+      ALLOWED_ORIGINS: '["http://127.0.0.1:8000"]'
+      DATABASE_URL: postgresql+asyncpg://chatbot:chatbot@db:5432/chatbot
+    ports:
+      - "8000:8000"
+    # Migration stratejisi: app açılışında migration'ları uygula, sonra sunucuyu başlat.
+    # Tek instance için en basit yol. (Çok replica'da eşzamanlı migration riski olur;
+    # o noktada ayrı bir migration job'a taşınır.)
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  pgdata:

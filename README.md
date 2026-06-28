@@ -1,101 +1,94 @@
 # FastAPI + WebSocket + Gemini Chatbot
 
-WebSocket üzerinden Google Gemini ile streaming sohbet eden bir FastAPI uygulaması.
+A real-time streaming chatbot built on **FastAPI**, **WebSocket**, and **Google Gemini**, with persistent conversation history in **PostgreSQL**. Token-authenticated, origin-checked, rate-limited, observable, tested, and containerized.
 
-## Çalıştırma
+## Quickstart (Docker)
 
 ```bash
+git clone <repo-url>
+cd <repo>
+cp .env.example .env        # fill in GEMINI_API_KEY and APP_ACCESS_TOKEN
+docker compose up --build
+```
+
+This starts PostgreSQL, applies database migrations, and launches the app at <http://127.0.0.1:8000>. Open it, paste your access token, and chat. Reload the page — the bot remembers the conversation (history is restored from PostgreSQL).
+
+## Run locally (without Docker)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+# Start a local PostgreSQL and create a database, then set DATABASE_URL in .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-`.env` dosyası gerekli değişkenler:
-
-```
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-2.5-flash
-APP_ACCESS_TOKEN=...
-ALLOWED_ORIGINS=["http://127.0.0.1:8000"]
-LOG_LEVEL=INFO
-HISTORY_WINDOW=10
-```
-
-## Test
+## Tests
 
 ```bash
+pip install pytest pytest-asyncio httpx
 pytest
 ```
 
-Testler gerçek Gemini API'sini **çağırmaz**; `FakeProvider` ile çalışır (faturalama yok, hızlı).
+Tests never call the real Gemini API or a real database — they use a `FakeProvider` and a `FakeRepository`, so they are fast and free.
 
-## Dizin yapısı
+## Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GEMINI_API_KEY` | yes | — | Google Gemini API key |
+| `APP_ACCESS_TOKEN` | yes | — | Shared token clients must present to connect |
+| `DATABASE_URL` | yes | — | Must use the async driver: `postgresql+asyncpg://...` |
+| `ALLOWED_ORIGINS` | yes | — | JSON list of allowed WebSocket origins |
+| `GEMINI_MODEL` | no | `gemini-2.5-flash` | Model id |
+| `LOG_LEVEL` | no | `INFO` | Logging level |
+| `HISTORY_TOKEN_BUDGET` | no | `4000` | Max token budget for context sent to the model |
+
+The same `Settings` class is fed from three sources depending on environment: a local `.env` file (dev), Compose `environment:` (containers), and CI/Railway environment variables (deploy). Environment variables always take precedence over `.env`, and `.env` is never baked into the image.
+
+## Architecture
 
 ```
-app/
-  main.py                       # FastAPI app + lifespan + router include
-  config.py                     # Settings (pydantic-settings)
-  logging_config.py             # logging setup + ConnectionLoggerAdapter
-  schemas/messages.py           # Pydantic mesaj modelleri (chunk/done/error/system/user)
-  routers/web.py                # GET / (chat sayfası), /health, /metrics
-  routers/ws.py                 # WS /ws endpoint
-  services/llm_provider.py      # LLMProvider Protocol + GeminiProvider
-  services/chat_service.py      # ChatService: history window + rate limit + stream
-  services/connection_manager.py# Aktif bağlantı izleme + metrics + close_all
-tests/                          # pytest unit + entegrasyon testleri
+Browser (templates/chat.html)
+  → routers/ws.py      : origin + token check, accept, validation, rate limit
+  → services/chat_service.py : token-budget context window, persist each turn
+  → services/llm_provider.py : Gemini streaming behind an LLMProvider interface
+  → db/repository.py   : all SQL/ORM access (ChatService stays SQL-agnostic)
+  → PostgreSQL         : conversations + messages (durable history)
+  ← chunks stream back → ws.py forwards to the browser
 ```
 
-## Mimari Kararlar
+Layers, each with a single responsibility:
 
-### WebSocket close code seçimi
-- **1008 (Policy Violation):** Yanlış `Origin` veya yanlış `token`. Bağlantı `accept` edilmeden reddedilir.
-- **1011 (Internal Error):** Beklenmedik exception sonrası, kullanıcıya generic mesaj gönderip kapanış.
-- **1012 (Service Restart):** SIGTERM ile kapanışta uvicorn'un kendisi gönderir (aşağıdaki graceful shutdown notuna bakın).
+- **config** — validated settings from env / `.env`
+- **schemas** — Pydantic message contracts (chunk / done / error / system / user / conversation)
+- **services/llm_provider** — provider-agnostic LLM interface + `GeminiProvider`
+- **services/chat_service** — history windowing (token budget), rate limit, streaming
+- **services/connection_manager** — active connections (gauge) + message counter
+- **db** — async SQLAlchemy engine, models, repository
+- **routers** — HTTP (`/`, `/health`, `/metrics`) and WebSocket (`/ws`)
+- **main** — lifespan (resource setup/teardown) + router wiring
 
-### Hata yönetimi
-- `WebSocketDisconnect` normal bir lifecycle olayı olarak ele alınır — sessizce loglanır, hata sayılmaz.
-- Ham exception mesajı kullanıcıya **sızdırılmaz**; sadece `connection_id` içeren generic mesaj döner, detay sunucu logunda kalır.
-- Gemini hataları tiplerine göre ayrılır: `ServerError` 503 (yoğunluk), `ClientError` 429 (kota), idle timeout.
+## Key design decisions
 
-### Rate limit
-- **Sliding window** algoritması: `time.monotonic()` ile son 10 saniyedeki mesajlar sayılır, 5'i aşınca reddedilir.
-- `monotonic` seçildi çünkü sistem saati değişse bile (NTP, DST) pencere bozulmaz.
+- **Close codes:** 1008 for auth/origin rejection, 1011 for unexpected errors, 1012 from uvicorn on shutdown.
+- **Errors never leak to the client:** internal exceptions are logged with a connection id; the client gets a generic message.
+- **Rate limit:** sliding window over `time.monotonic()` (robust against clock changes).
+- **Context window:** the full history lives in the DB; only a token-bounded slice is sent to the model — cost stays bounded.
+- **LLM behind an interface:** swapping providers means writing one new class; tests inject a fake.
+- **Resources in lifespan:** the Gemini client and connection manager are created once at startup, not per request.
+- **Migrations:** schema changes are versioned with Alembic; the app runs `alembic upgrade head` on container start.
+- **Single uvicorn worker:** per-connection WebSocket state (rate-limit list) is not shared across workers; scaling later requires shared state (e.g. Redis).
 
-### History pencereleme (maliyet kontrolü)
-- Gemini'nin `chat` nesnesi yerine history **manuel** tutulur (`list[types.Content]`).
-- Her istekte yalnızca son `HISTORY_WINDOW` turn modele gönderilir → token maliyeti plato yapar, sınırsız büyümez.
-- Pencere slice'ı tek bir `_windowed_history()` metodunda — loglanan turn sayısı ile gerçekte gönderilen her zaman aynı.
+## Endpoints
 
-### Generation config
-- `temperature=0.2` (tutarlı, daha az halüsinasyon), `max_output_tokens=3000` (maliyet tavanı).
-- System instruction `GeminiProvider` içinde sabit; her bağlantıda yeniden oluşturulmaz.
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Chat UI |
+| GET | `/health` | Liveness probe |
+| GET | `/metrics` | `active_connections`, `total_messages` |
+| WS | `/ws?token=...&conversation_id=...` | Streaming chat |
 
-### Katmanlı yapı ve LLM soyutlaması
-- `LLMProvider` bir `Protocol` (structural typing) — `GeminiProvider` onu implement eder, `FakeProvider` testlerde yerine geçer.
-- `ChatService` connection-bağlı state tutar (history, rate-limit timestamps), bu yüzden **her bağlantı için ayrı** oluşturulur.
-- `genai.Client` connection-bağımsız ve pahalı, bu yüzden **lifespan**'da bir kez oluşturulup `app.state`'e konur.
+## CI
 
-### Lifespan ve kaynak yönetimi
-- `genai.Client` ve `ConnectionManager` startup'ta oluşturulur, `app.state`'e bağlanır.
-- 12-factor "backing services" prensibi: kaynaklar uygulama yaşam döngüsüne bağlı.
-
-### Gözlemlenebilirlik
-- `/health`: liveness probe — Gemini client init olmuşsa 200, olmamışsa 503.
-- `/metrics`: `active_connections` (gauge) ve `total_messages` (counter). Prometheus entegrasyonu için doğal büyüme noktası.
-- `ConnectionLoggerAdapter` her log satırına `connection_id` ekler (aranabilir, structured).
-
-### Graceful shutdown (önemli gözlem)
-- `ConnectionManager.close_all(code=1001)` lifespan shutdown'da çağrılır.
-- **Ancak:** uvicorn, SIGTERM aldığında açık WS bağlantılarını **lifespan shutdown'dan önce** kendisi kapatır (close code **1012**). Bu yüzden `close_all` çalıştığında bağlantı listesi genelde boştur ve istemci pratikte 1012 alır, 1001 değil.
-- Bu, ASGI lifespan protokolünün doğal sırasıdır, bir bug değildir. Hem 1001 (Going Away) hem 1012 (Service Restart) geçerli "sunucu kapanıyor" kodlarıdır; 1012 deploy/restart senaryosu için anlamca daha doğrudur.
-- `close_all` yine de tutuluyor: (1) programatik kapatma yeteneği, (2) uvicorn'un yakalamadığı bir bağlantı kalırsa güvenlik ağı.
-
-### Heartbeat / zombie connection
-- Uygulama seviyesinde ping/pong **eklenmedi** (bilinçli karar). uvicorn'un kendi WebSocket ping interval'ı half-open bağlantıları tespit etmek için yeterli. Uygulama seviyesi heartbeat erken karmaşıklık olurdu.
-
-### Test stratejisi
-- Test piramidi: çoğunluk unit (`ChatService`, `ConnectionManager`), birkaç entegrasyon (`TestClient` ile WS happy/negative path).
-- `FakeProvider` ile gerçek API çağrısı yapılmaz — testler hızlı (~0.2s) ve faturasız.
-- pytest tuzağı: `settings` singleton modül yüklenirken oluştuğu için `monkeypatch.setenv` çalışmaz; `monkeypatch.setattr(settings, ...)` ile patch edilir.
-
-## Ertelenen konular (ikinci tur)
-Dockerfile, reverse proxy, JWT auth, persistent storage, tam Prometheus/OpenTelemetry entegrasyonu, multi-cihaz oturum.
+GitHub Actions runs `ruff` (lint) and `pytest` on every push and pull request, with a PostgreSQL service container available for tests.
