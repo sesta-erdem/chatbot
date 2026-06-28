@@ -41,8 +41,11 @@ async def websocket_endpoint(websocket: WebSocket):
     ws_logger = ConnectionLoggerAdapter(logger, {"connection_id": connection_id})
 
     genai_client = websocket.app.state.genai_client
+    manager = websocket.app.state.connection_manager
     provider = GeminiProvider(client=genai_client, model=settings.gemini_model)
     service = ChatService(provider=provider, history_window=settings.history_window)
+
+    manager.register(connection_id, websocket)
 
     try:
         ws_logger.info("Kullanıcı bağlandı")
@@ -80,6 +83,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 ws_logger.warning(f"Rate limit aşıldı: {exc}")
                 continue
 
+            manager.record_message()
             ws_logger.info(f"Modele gönderilen turn sayısı: {service.turns_in_window()}")
 
             try:
@@ -122,4 +126,5 @@ async def websocket_endpoint(websocket: WebSocket):
         except RuntimeError:
             ws_logger.warning("Bağlantı zaten kapalı")
     finally:
+        manager.unregister(connection_id)
         ws_logger.info("Bağlantı sonlandı")

@@ -27,12 +27,15 @@ class ChatService:
             raise RateLimitExceeded(f"pencerede {len(self._timestamps)} mesaj")
         self._timestamps.append(now)
 
+    def _windowed_history(self) -> list[types.Content]:
+        """Modele gönderilecek son N turn (1 turn = user + model = 2 Content)."""
+        return self._history[-(self._history_window * 2):]
+
     def turns_in_window(self) -> int:
-        windowed = self._history[-(self._history_window * 2):]
-        return len(windowed) // 2
+        return len(self._windowed_history()) // 2
 
     async def stream_response(self, message: str) -> AsyncIterator[str]:
-        windowed = self._history[-(self._history_window * 2):]
+        windowed = self._windowed_history()
         full_response: list[str] = []
 
         async for chunk in self._provider.stream(message, windowed):

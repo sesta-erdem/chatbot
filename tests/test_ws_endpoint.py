@@ -3,13 +3,11 @@ WS endpoint entegrasyon testleri.
 GeminiProvider yerine FakeProvider kullanmak için ws.py'de
 GeminiProvider'ı monkeypatch ile değiştiriyoruz.
 """
-import json
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from tests.conftest import TOKEN, ORIGIN, FakeProvider
 
 
@@ -100,3 +98,35 @@ def test_health_returns_200(client):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["gemini_client"] is True
+
+
+# --- metrics ---
+
+def test_metrics_endpoint_reports_zero_initially(client):
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["active_connections"] == 0
+    assert body["total_messages"] == 0
+
+
+def test_metrics_counts_active_connection(client):
+    with ws_connect(client):
+        resp = client.get("/metrics")
+        body = resp.json()
+        assert body["active_connections"] == 1
+    # Bağlantı kapandıktan sonra düşmeli
+    resp = client.get("/metrics")
+    assert resp.json()["active_connections"] == 0
+
+
+def test_metrics_counts_total_messages(client):
+    provider = FakeProvider(chunks=["ok"])
+    with patch("app.routers.ws.GeminiProvider", return_value=provider):
+        with ws_connect(client) as ws:
+            send_msg(ws, "bir")
+            collect_until_done(ws)
+            send_msg(ws, "iki")
+            collect_until_done(ws)
+    resp = client.get("/metrics")
+    assert resp.json()["total_messages"] == 2

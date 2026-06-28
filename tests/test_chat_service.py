@@ -86,8 +86,7 @@ def test_rate_limit_raises_on_sixth():
         service.check_rate_limit()
 
 
-def test_rate_limit_resets_after_window(monkeypatch):
-    import time
+def test_rate_limit_resets_after_window():
     provider = FakeProvider()
     service = ChatService(provider=provider, history_window=5)
 
