@@ -1,18 +1,16 @@
-import uuid
-
 import pytest
 
-from app.services.chat_service import ChatService, RateLimitExceeded
+from app.services.chat_service import ChatService, RateLimitExceeded, estimate_tokens
 from tests.conftest import FakeProvider, FakeRepository
 
 
-async def make_service(provider, history_window=5):
+async def make_service(provider, history_token_budget=4000):
     """FakeRepository ile DB'siz bir ChatService kurar; (service, repo) döndürür."""
     repo = FakeRepository()
     conversation_id = await repo.create_conversation()
     service = ChatService(
         provider=provider,
-        history_window=history_window,
+        history_token_budget=history_token_budget,
         repo=repo,
         conversation_id=conversation_id,
     )
@@ -26,6 +24,14 @@ async def collect(service: ChatService, message: str) -> str:
     return "".join(parts)
 
 
+# --- token tahmini ---
+
+def test_estimate_tokens_roughly_chars_over_four():
+    assert estimate_tokens("") == 1          # en az 1
+    assert estimate_tokens("abcd") == 1      # 4/4
+    assert estimate_tokens("a" * 40) == 10   # 40/4
+
+
 # --- stream ---
 
 async def test_stream_returns_provider_chunks():
@@ -34,52 +40,53 @@ async def test_stream_returns_provider_chunks():
     assert result == "hello world"
 
 
-async def test_stream_appends_to_history():
+async def test_stream_appends_to_history_with_token_count():
     service, repo = await make_service(FakeProvider(chunks=["cevap"]))
     await collect(service, "soru")
     history = await repo.get_history(service._conversation_id)
     assert len(history) == 2
     assert history[0].role == "user"
     assert history[1].role == "model"
+    assert history[0].token_count >= 1
+    assert history[1].token_count >= 1
 
 
-# --- history windowing ---
+# --- token bütçesi ile pencereleme ---
 
-async def test_window_limits_history_sent_to_provider():
+async def test_window_respects_token_budget():
+    # Her mesaj ~1 token (user "msgN" ≈ 1, model "x" ≈ 1). Bütçe 4 → en fazla 4 mesaj.
     provider = FakeProvider(chunks=["x"])
-    service, _ = await make_service(provider, history_window=2)
-
-    # 4 mesaj gönder — window=2 demek max 2 turn (4 Content)
-    for i in range(4):
-        await collect(service, f"msg{i}")
-
-    # 5. mesajda provider'a gönderilen history en fazla 4 Content olmalı (2 turn)
-    await collect(service, "son mesaj")
-    assert len(provider.last_history) <= 4
-
-
-async def test_window_plateaus_at_max():
-    provider = FakeProvider(chunks=["y"])
-    service, _ = await make_service(provider, history_window=3)
+    service, _ = await make_service(provider, history_token_budget=4)
 
     for i in range(10):
         await collect(service, f"msg{i}")
 
-    # Toplam history 20 Content olsa da son çağrıda max 6 (3 turn) gitmeli
-    assert len(provider.last_history) == 6
+    assert len(provider.last_history) == 4
 
 
-async def test_turns_in_window_increments_then_plateaus():
-    provider = FakeProvider(chunks=["z"])
-    service, _ = await make_service(provider, history_window=3)
+async def test_window_token_count_caps_at_budget():
+    provider = FakeProvider(chunks=["x"])
+    service, _ = await make_service(provider, history_token_budget=4)
 
-    counts = []
-    for i in range(6):
-        counts.append(await service.turns_in_window())
+    for i in range(10):
         await collect(service, f"msg{i}")
 
-    # 0, 1, 2, 3, 3, 3
-    assert counts == [0, 1, 2, 3, 3, 3]
+    assert await service.window_token_count() <= 4
+
+
+async def test_window_grows_then_plateaus():
+    provider = FakeProvider(chunks=["x"])
+    service, _ = await make_service(provider, history_token_budget=4)
+
+    sizes = []
+    for i in range(6):
+        sizes.append(len(provider.last_history))  # bir önceki çağrının gönderdiği
+        await collect(service, f"msg{i}")
+
+    # 0 (ilk), sonra artar, 4'te platoya oturur
+    assert sizes[0] == 0
+    assert max(sizes) == 4
+    assert sizes[-1] == 4
 
 
 # --- rate limit ---
@@ -100,13 +107,7 @@ async def test_rate_limit_raises_on_sixth():
 
 async def test_rate_limit_resets_after_window():
     service, _ = await make_service(FakeProvider())
-
-    # 5 mesaj gönder, sonra zamanı 11 saniye ileri al
     for _ in range(5):
         service.check_rate_limit()
-
-    # Zamanı sahte olarak 11s ileri sarmak için _timestamps'i elle güncelle
     service._timestamps = [t - 11 for t in service._timestamps]
-
-    # Artık geçmeli — pencere dışına çıktı
-    service.check_rate_limit()  # raise etmemeli
+    service.check_rate_limit()  # pencere dışı → raise etmemeli

@@ -74,10 +74,10 @@ def client(monkeypatch):
     # settings singleton'ı zaten yüklenmiş; attribute'ları doğrudan patch et
     monkeypatch.setattr(cfg.settings, "app_access_token", TOKEN)
     monkeypatch.setattr(cfg.settings, "allowed_origins", [ORIGIN])
-    monkeypatch.setattr(cfg.settings, "history_window", 5)
+    monkeypatch.setattr(cfg.settings, "history_token_budget", 4000)
     monkeypatch.setattr(ws_module.settings, "app_access_token", TOKEN)
     monkeypatch.setattr(ws_module.settings, "allowed_origins", [ORIGIN])
-    monkeypatch.setattr(ws_module.settings, "history_window", 5)
+    monkeypatch.setattr(ws_module.settings, "history_token_budget", 4000)
 
     # Gerçek DB'ye çarpmamak için repository'yi FakeRepository ile değiştir
     monkeypatch.setattr(ws_module, "ConversationRepository", FakeRepository)

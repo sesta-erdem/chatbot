@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     app_access_token: str
     allowed_origins: list[str]
-    history_window: int = 10
+    history_token_budget: int = 4000  # modele giden bağlamın maksimum token bütçesi
     database_url: str
 
     @field_validator("gemini_api_key", mode="after")

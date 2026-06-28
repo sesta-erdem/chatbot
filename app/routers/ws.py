@@ -77,7 +77,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     service = ChatService(
         provider=provider,
-        history_window=settings.history_window,
+        history_token_budget=settings.history_token_budget,
         repo=repo,
         conversation_id=conversation_id,
     )
@@ -121,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             manager.record_message()
-            ws_logger.info(f"Modele gönderilen turn sayısı: {await service.turns_in_window()}")
+            ws_logger.info(f"Modele giden bağlam ~token: {await service.window_token_count()}")
 
             try:
                 loop = asyncio.get_running_loop()
