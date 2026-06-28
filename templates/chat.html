@@ -379,9 +379,9 @@
 
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const tokenStorageKey = "chat_access_token";
-    let accessToken = window.sessionStorage.getItem(tokenStorageKey);
+    let accessToken = (window.sessionStorage.getItem(tokenStorageKey) || "").trim();
     if (!accessToken) {
-        accessToken = window.prompt("Access token") || "";
+        accessToken = (window.prompt("Access token") || "").trim();
         if (accessToken) {
             window.sessionStorage.setItem(tokenStorageKey, accessToken);
         }
