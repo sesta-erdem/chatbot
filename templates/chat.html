@@ -386,8 +386,13 @@
             window.sessionStorage.setItem(tokenStorageKey, accessToken);
         }
     }
+    const conversationStorageKey = "chat_conversation_id";
     const wsUrl = new URL(proto + "://" + window.location.host + "/ws");
     wsUrl.searchParams.set("token", accessToken);
+    const savedConversation = window.sessionStorage.getItem(conversationStorageKey);
+    if (savedConversation) {
+        wsUrl.searchParams.set("conversation_id", savedConversation);
+    }
     const ws = new WebSocket(wsUrl.toString());
 
     function setStatus(state) {
@@ -420,7 +425,11 @@
             return;
         }
 
-        if (msg.type === "chunk") {
+        if (msg.type === "conversation") {
+            window.sessionStorage.setItem(conversationStorageKey, msg.conversation_id);
+            return;
+
+        } else if (msg.type === "chunk") {
             if (!activeBubble) {
                 hideEmpty();
                 activeBubble = createBubble('in');

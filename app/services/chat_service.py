@@ -1,8 +1,10 @@
 import time
+import uuid
 from typing import AsyncIterator
 
 from google.genai import types
 
+from app.db.repository import ConversationRepository
 from app.services.llm_provider import LLMProvider
 
 RATE_LIMIT_WINDOW = 10.0
@@ -14,10 +16,23 @@ class RateLimitExceeded(Exception):
 
 
 class ChatService:
-    def __init__(self, provider: LLMProvider, history_window: int) -> None:
+    """
+    Bir bağlantının sohbet mantığı.
+    Geçmiş artık bellekte değil DB'de (repository üzerinden) — bağlantı ölse de kalıcı.
+    Rate limit ise bağlantıya özel kalır (bellekte timestamps).
+    """
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        history_window: int,
+        repo: ConversationRepository,
+        conversation_id: uuid.UUID,
+    ) -> None:
         self._provider = provider
         self._history_window = history_window
-        self._history: list[types.Content] = []
+        self._repo = repo
+        self._conversation_id = conversation_id
         self._timestamps: list[float] = []
 
     def check_rate_limit(self) -> None:
@@ -27,20 +42,27 @@ class ChatService:
             raise RateLimitExceeded(f"pencerede {len(self._timestamps)} mesaj")
         self._timestamps.append(now)
 
-    def _windowed_history(self) -> list[types.Content]:
-        """Modele gönderilecek son N turn (1 turn = user + model = 2 Content)."""
-        return self._history[-(self._history_window * 2):]
+    async def _windowed_history(self) -> list[types.Content]:
+        """DB'deki TAM geçmişten son N turn'ü seç ve Gemini formatına çevir (1 turn = user + model)."""
+        messages = await self._repo.get_history(self._conversation_id)
+        windowed = messages[-(self._history_window * 2):]
+        return [
+            types.Content(role=m.role, parts=[types.Part(text=m.content)])
+            for m in windowed
+        ]
 
-    def turns_in_window(self) -> int:
-        return len(self._windowed_history()) // 2
+    async def turns_in_window(self) -> int:
+        messages = await self._repo.get_history(self._conversation_id)
+        return len(messages[-(self._history_window * 2):]) // 2
 
     async def stream_response(self, message: str) -> AsyncIterator[str]:
-        windowed = self._windowed_history()
+        windowed = await self._windowed_history()
         full_response: list[str] = []
 
         async for chunk in self._provider.stream(message, windowed):
             full_response.append(chunk)
             yield chunk
 
-        self._history.append(types.Content(role="user", parts=[types.Part(text=message)]))
-        self._history.append(types.Content(role="model", parts=[types.Part(text="".join(full_response))]))
+        # Hata olmadan tamamlandıysa hem soruyu hem cevabı DB'ye yaz (kalıcı geçmiş)
+        await self._repo.append_message(self._conversation_id, "user", message)
+        await self._repo.append_message(self._conversation_id, "model", "".join(full_response))

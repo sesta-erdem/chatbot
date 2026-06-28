@@ -15,12 +15,26 @@ class Settings(BaseSettings):
     app_access_token: str
     allowed_origins: list[str]
     history_window: int = 10
+    database_url: str
 
     @field_validator("gemini_api_key", mode="after")
     @classmethod
     def gemini_api_key_validator(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("gemini_api_key is empty")
+        return value
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def database_url_validator(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("database_url is empty")
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "database_url async sürücü kullanmalı: 'postgresql+asyncpg://...' "
+                "(düz 'postgresql://' senkron sürücüdür ve event loop'u bloklar)"
+            )
         return value
 
     @field_validator("log_level", mode="after")

@@ -25,3 +25,9 @@ class SystemMessage(BaseModel):
 class UserMessage(BaseModel):
     type: Literal["user_message"]
     content: str
+
+
+class ConversationMessage(BaseModel):
+    """Sunucu yeni bir konuşma açınca id'yi istemciye bildirir; istemci saklayıp reconnect'te geri yollar."""
+    type: Literal["conversation"] = "conversation"
+    conversation_id: str

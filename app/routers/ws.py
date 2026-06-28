@@ -9,8 +9,16 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
+from app.db.repository import ConversationRepository
 from app.logging_config import ConnectionLoggerAdapter
-from app.schemas.messages import ChunkMessage, DoneMessage, ErrorMessage, SystemMessage, UserMessage
+from app.schemas.messages import (
+    ChunkMessage,
+    ConversationMessage,
+    DoneMessage,
+    ErrorMessage,
+    SystemMessage,
+    UserMessage,
+)
 from app.services.chat_service import ChatService, RateLimitExceeded
 from app.services.llm_provider import GeminiProvider
 from google.genai.errors import ClientError, ServerError
@@ -19,6 +27,24 @@ IDLE_TIMEOUT = 30.0
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def resolve_conversation(websocket, repo, ws_logger) -> uuid.UUID:
+    """conversation_id query'den gelirse ve geçerliyse onu kullan; yoksa yeni konuşma aç ve id'yi bildir."""
+    raw = websocket.query_params.get("conversation_id")
+    if raw:
+        try:
+            cid = uuid.UUID(raw)
+        except ValueError:
+            cid = None
+        if cid and await repo.exists(cid):
+            ws_logger.info("Mevcut konuşma yüklendi")
+            return cid
+
+    cid = await repo.create_conversation()
+    await websocket.send_json(ConversationMessage(conversation_id=str(cid)).model_dump())
+    ws_logger.info("Yeni konuşma açıldı")
+    return cid
 
 
 @router.websocket("/ws")
@@ -43,12 +69,23 @@ async def websocket_endpoint(websocket: WebSocket):
     genai_client = websocket.app.state.genai_client
     manager = websocket.app.state.connection_manager
     provider = GeminiProvider(client=genai_client, model=settings.gemini_model)
-    service = ChatService(provider=provider, history_window=settings.history_window)
+    repo = ConversationRepository()
+
+    # conversation_id: istemciden gelirse (reconnect) onu kullan, yoksa yeni konuşma aç.
+    # connection_id her bağlantıda yeni (geçici); conversation_id kalıcı (geçmişin anahtarı).
+    conversation_id = await resolve_conversation(websocket, repo, ws_logger)
+
+    service = ChatService(
+        provider=provider,
+        history_window=settings.history_window,
+        repo=repo,
+        conversation_id=conversation_id,
+    )
 
     manager.register(connection_id, websocket)
 
     try:
-        ws_logger.info("Kullanıcı bağlandı")
+        ws_logger.info(f"Kullanıcı bağlandı (conversation={conversation_id})")
         while True:
             try:
                 raw = await websocket.receive_json()
@@ -84,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             manager.record_message()
-            ws_logger.info(f"Modele gönderilen turn sayısı: {service.turns_in_window()}")
+            ws_logger.info(f"Modele gönderilen turn sayısı: {await service.turns_in_window()}")
 
             try:
                 loop = asyncio.get_running_loop()

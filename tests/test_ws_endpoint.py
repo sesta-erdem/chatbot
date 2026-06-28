@@ -20,11 +20,13 @@ def send_msg(ws, content: str):
 
 
 def collect_until_done(ws) -> tuple[str, str]:
-    """chunk'ları birleştir, done/error/system'de dur. (text, final_type) döndür."""
+    """chunk'ları birleştir, done/error/system'de dur. İlk gelen 'conversation' mesajını atlar."""
     parts = []
     while True:
         data = ws.receive_json()
         t = data["type"]
+        if t == "conversation":
+            continue  # bağlantı başında gelen conversation_id bildirimi — atla
         if t == "chunk":
             parts.append(data["content"])
         elif t == "done":

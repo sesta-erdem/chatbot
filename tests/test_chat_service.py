@@ -1,7 +1,22 @@
+import uuid
+
 import pytest
 
 from app.services.chat_service import ChatService, RateLimitExceeded
-from tests.conftest import FakeProvider
+from tests.conftest import FakeProvider, FakeRepository
+
+
+async def make_service(provider, history_window=5):
+    """FakeRepository ile DB'siz bir ChatService kurar; (service, repo) döndürür."""
+    repo = FakeRepository()
+    conversation_id = await repo.create_conversation()
+    service = ChatService(
+        provider=provider,
+        history_window=history_window,
+        repo=repo,
+        conversation_id=conversation_id,
+    )
+    return service, repo
 
 
 async def collect(service: ChatService, message: str) -> str:
@@ -14,26 +29,25 @@ async def collect(service: ChatService, message: str) -> str:
 # --- stream ---
 
 async def test_stream_returns_provider_chunks():
-    provider = FakeProvider(chunks=["hello ", "world"])
-    service = ChatService(provider=provider, history_window=5)
+    service, _ = await make_service(FakeProvider(chunks=["hello ", "world"]))
     result = await collect(service, "merhaba")
     assert result == "hello world"
 
 
 async def test_stream_appends_to_history():
-    provider = FakeProvider(chunks=["cevap"])
-    service = ChatService(provider=provider, history_window=5)
+    service, repo = await make_service(FakeProvider(chunks=["cevap"]))
     await collect(service, "soru")
-    assert len(service._history) == 2
-    assert service._history[0].role == "user"
-    assert service._history[1].role == "model"
+    history = await repo.get_history(service._conversation_id)
+    assert len(history) == 2
+    assert history[0].role == "user"
+    assert history[1].role == "model"
 
 
 # --- history windowing ---
 
 async def test_window_limits_history_sent_to_provider():
     provider = FakeProvider(chunks=["x"])
-    service = ChatService(provider=provider, history_window=2)
+    service, _ = await make_service(provider, history_window=2)
 
     # 4 mesaj gönder — window=2 demek max 2 turn (4 Content)
     for i in range(4):
@@ -46,7 +60,7 @@ async def test_window_limits_history_sent_to_provider():
 
 async def test_window_plateaus_at_max():
     provider = FakeProvider(chunks=["y"])
-    service = ChatService(provider=provider, history_window=3)
+    service, _ = await make_service(provider, history_window=3)
 
     for i in range(10):
         await collect(service, f"msg{i}")
@@ -57,11 +71,11 @@ async def test_window_plateaus_at_max():
 
 async def test_turns_in_window_increments_then_plateaus():
     provider = FakeProvider(chunks=["z"])
-    service = ChatService(provider=provider, history_window=3)
+    service, _ = await make_service(provider, history_window=3)
 
     counts = []
     for i in range(6):
-        counts.append(service.turns_in_window())
+        counts.append(await service.turns_in_window())
         await collect(service, f"msg{i}")
 
     # 0, 1, 2, 3, 3, 3
@@ -70,25 +84,22 @@ async def test_turns_in_window_increments_then_plateaus():
 
 # --- rate limit ---
 
-def test_rate_limit_passes_under_max():
-    provider = FakeProvider()
-    service = ChatService(provider=provider, history_window=5)
+async def test_rate_limit_passes_under_max():
+    service, _ = await make_service(FakeProvider())
     for _ in range(5):
         service.check_rate_limit()  # 5 kez geçmeli
 
 
-def test_rate_limit_raises_on_sixth():
-    provider = FakeProvider()
-    service = ChatService(provider=provider, history_window=5)
+async def test_rate_limit_raises_on_sixth():
+    service, _ = await make_service(FakeProvider())
     for _ in range(5):
         service.check_rate_limit()
     with pytest.raises(RateLimitExceeded):
         service.check_rate_limit()
 
 
-def test_rate_limit_resets_after_window():
-    provider = FakeProvider()
-    service = ChatService(provider=provider, history_window=5)
+async def test_rate_limit_resets_after_window():
+    service, _ = await make_service(FakeProvider())
 
     # 5 mesaj gönder, sonra zamanı 11 saniye ileri al
     for _ in range(5):
