@@ -28,6 +28,7 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://chatbot:chatbot@localhost:5432/chatbot
       GEMINI_API_KEY: dummy-key-for-ci
       APP_ACCESS_TOKEN: dummy-token-for-ci
+      JWT_SECRET: dummy-jwt-secret-for-ci-at-least-16
       ALLOWED_ORIGINS: '["http://127.0.0.1:8000"]'
       HISTORY_TOKEN_BUDGET: "4000"
 
