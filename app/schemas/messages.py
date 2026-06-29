@@ -10,6 +10,7 @@ class ChunkMessage(BaseModel):
 
 class DoneMessage(BaseModel):
     type: Literal["done"] = "done"
+    sources: list[dict] = []  # RAG kaynakları: [{"file": ..., "page": ...}]
 
 
 class ErrorMessage(BaseModel):

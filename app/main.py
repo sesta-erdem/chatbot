@@ -6,7 +6,7 @@ from google import genai
 
 from app.config import settings
 from app.logging_config import setup_logging
-from app.routers import admin, auth, web, ws
+from app.routers import admin, auth, documents, web, ws
 from app.services.connection_manager import ConnectionManager
 from app.services.rate_limit import RateLimiter
 
@@ -31,3 +31,4 @@ app.include_router(web.router)
 app.include_router(ws.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(documents.router)

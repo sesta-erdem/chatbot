@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
-from app.db.repository import ConversationRepository, UserRepository
+from app.db.repository import ConversationRepository, DocumentRepository, UserRepository
 from app.logging_config import ConnectionLoggerAdapter
 from app.schemas.messages import (
     ChunkMessage,
@@ -20,6 +20,7 @@ from app.schemas.messages import (
 )
 from app.services.auth import TokenError, decode_token
 from app.services.chat_service import ChatService
+from app.services.embeddings import GeminiEmbeddingProvider
 from app.services.llm_provider import GeminiProvider
 from app.services.rate_limit import RateLimitExceeded
 from google.genai.errors import ClientError, ServerError
@@ -90,7 +91,9 @@ async def websocket_endpoint(websocket: WebSocket):
     manager = websocket.app.state.connection_manager
     rate_limiter = websocket.app.state.rate_limiter
     provider = GeminiProvider(client=genai_client, model=settings.gemini_model)
+    embedder = GeminiEmbeddingProvider(client=genai_client, model=settings.embedding_model)
     repo = ConversationRepository()
+    doc_repo = DocumentRepository()
 
     conversation_id = await resolve_conversation(websocket, repo, user_id, ws_logger)
 
@@ -99,6 +102,11 @@ async def websocket_endpoint(websocket: WebSocket):
         history_token_budget=settings.history_token_budget,
         repo=repo,
         conversation_id=conversation_id,
+        embedder=embedder,
+        doc_repo=doc_repo,
+        user_id=user_id,
+        rag_top_k=settings.rag_top_k,
+        rag_distance_threshold=settings.rag_distance_threshold,
     )
 
     manager.register(connection_id, websocket)
@@ -149,7 +157,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     async for chunk in service.stream_response(data.strip()):
                         await websocket.send_json(ChunkMessage(content=chunk).model_dump())
                         timeout.reschedule(loop.time() + IDLE_TIMEOUT)
-                await websocket.send_json(DoneMessage().model_dump())
+                await websocket.send_json(DoneMessage(sources=service.last_sources).model_dump())
             except asyncio.TimeoutError:
                 ws_logger.warning("Gemini yanıt akışı durdu (idle timeout).")
                 await websocket.send_json(ErrorMessage(content="Tekrar deneyiniz.").model_dump())

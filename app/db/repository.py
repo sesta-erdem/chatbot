@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import select
 
 from app.db.base import async_session
-from app.db.models import Conversation, Message, User
+from app.db.models import Chunk, Conversation, Document, Message, User
 
 
 class UserRepository:
@@ -76,3 +76,49 @@ class ConversationRepository:
                 .order_by(Message.created_at)
             )
             return list(result.scalars().all())
+
+
+class DocumentRepository:
+    """Doküman + chunk yazımı ve KULLANICIYA SINIRLI benzerlik araması (RAG)."""
+
+    async def add_document(
+        self,
+        user_id: uuid.UUID,
+        filename: str,
+        items: list[tuple[int, str, list[float]]],  # (page, content, embedding)
+    ) -> uuid.UUID:
+        async with async_session() as session:
+            document = Document(user_id=user_id, filename=filename)
+            session.add(document)
+            await session.flush()  # document.id için
+            for page, content, embedding in items:
+                session.add(
+                    Chunk(
+                        document_id=document.id,
+                        user_id=user_id,
+                        content=content,
+                        page=page,
+                        embedding=embedding,
+                    )
+                )
+            await session.commit()
+            return document.id
+
+    async def search(
+        self, user_id: uuid.UUID, query_embedding: list[float], top_k: int
+    ) -> list[dict]:
+        """En yakın top_k chunk (yalnız bu kullanıcının dokümanları). Düz veri döner (lazy-load yok)."""
+        async with async_session() as session:
+            distance = Chunk.embedding.cosine_distance(query_embedding)
+            stmt = (
+                select(Chunk.content, Chunk.page, Document.filename, distance.label("distance"))
+                .join(Document, Chunk.document_id == Document.id)
+                .where(Chunk.user_id == user_id)
+                .order_by(distance)
+                .limit(top_k)
+            )
+            rows = (await session.execute(stmt)).all()
+            return [
+                {"content": r.content, "page": r.page, "filename": r.filename, "distance": r.distance}
+                for r in rows
+            ]

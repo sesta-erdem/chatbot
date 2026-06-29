@@ -88,10 +88,15 @@ Layers, each with a single responsibility:
 | GET | `/` | Chat UI |
 | POST | `/auth/register` | Create account, returns a JWT |
 | POST | `/auth/login` | Authenticate, returns a JWT |
+| POST | `/documents/upload` | Upload a PDF (auth'd) → chunk → embed → store |
 | GET | `/health` | Liveness probe |
 | GET | `/metrics` | `active_connections`, `total_messages` |
 | GET | `/admin/stats` | Admin-only stats (role `admin`) |
-| WS | `/ws?token=<jwt>&conversation_id=...` | Streaming chat (JWT-authenticated) |
+| WS | `/ws?token=<jwt>&conversation_id=...` | Streaming chat (JWT-authenticated, RAG-enabled) |
+
+## RAG (chat with your documents)
+
+Upload a PDF and the chat answers from its contents. Ingestion: extract text per page → chunk (overlapping) → embed each chunk (Gemini) → store vectors in **pgvector**. Retrieval: embed the question → cosine-similarity search over **your own** chunks only → if matches pass the distance threshold, they are injected into the prompt with a "answer only from these passages, else say you couldn't find it" instruction; the answer comes back with `sources: [{file, page}]` in the `done` message. Below the threshold, the bot says it couldn't find the answer instead of hallucinating. Vector search is brute-force (no ANN index) — correct for demo scale; an `hnsw`/`ivfflat` index is the upgrade when row counts grow.
 
 ## Authentication
 

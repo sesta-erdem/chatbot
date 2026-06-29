@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     # kontrol edilmez. Bu yüzden makul uzun bir süre (7 gün) seçiyoruz.
     jwt_expire_minutes: int = 60 * 24 * 7
 
+    # RAG ayarları
+    embedding_model: str = "text-embedding-004"
+    embedding_dim: int = 768
+    chunk_size: int = 1000           # karakter (kaba); deney günlüğüyle ayarlanır
+    chunk_overlap: int = 200
+    rag_top_k: int = 4               # kaç parça getirilsin
+    rag_distance_threshold: float = 0.65  # cosine distance; üstündeyse "bulamadım"
+    max_upload_bytes: int = 5 * 1024 * 1024  # 5 MB
+
     @field_validator("gemini_api_key", mode="after")
     @classmethod
     def gemini_api_key_validator(cls, value: str) -> str:

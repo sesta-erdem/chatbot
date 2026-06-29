@@ -19,15 +19,42 @@ class FakeProvider:
         self.chunks = chunks or ["merhaba ", "dünya"]
         self.call_count = 0
         self.last_history: list[types.Content] = []
+        self.last_message: str = ""
 
     async def stream(self, message: str, history: list[types.Content]) -> AsyncIterator[str]:
         self.call_count += 1
         self.last_history = list(history)
+        self.last_message = message
         for chunk in self.chunks:
             yield chunk
 
 
 assert isinstance(FakeProvider(), LLMProvider)
+
+
+class FakeEmbeddingProvider:
+    """Gerçek embedding üretmeden sabit vektör döndürür (retrieval mekaniği fake repo'da test edilir)."""
+
+    def __init__(self, dim: int = 8) -> None:
+        self.dim = dim
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * self.dim for _ in texts]
+
+
+class FakeDocumentRepository:
+    """search() önceden ayarlanmış hit'leri döndürür; eşik/bağlam mantığını test etmek için."""
+
+    def __init__(self, hits: list[dict] | None = None) -> None:
+        self.hits = hits or []
+        self.added: list[tuple] = []
+
+    async def add_document(self, user_id, filename, items) -> "uuid.UUID":
+        self.added.append((user_id, filename, items))
+        return uuid.uuid4()
+
+    async def search(self, user_id, query_embedding, top_k) -> list[dict]:
+        return self.hits[:top_k]
 
 
 class FakeConversationRepository:
@@ -129,6 +156,9 @@ def client(monkeypatch, user_repo, conv_repo):
     monkeypatch.setattr(ws_module, "UserRepository", lambda: user_repo)
     monkeypatch.setattr(auth_module, "UserRepository", lambda: user_repo)
     monkeypatch.setattr(deps_module, "UserRepository", lambda: user_repo)
+    # RAG bileşenleri: WS testlerinde no-op (doküman yok → düz akış)
+    monkeypatch.setattr(ws_module, "GeminiEmbeddingProvider", lambda **kw: FakeEmbeddingProvider())
+    monkeypatch.setattr(ws_module, "DocumentRepository", lambda: FakeDocumentRepository())
 
     with TestClient(app) as c:
         app.state.genai_client = MagicMock()
