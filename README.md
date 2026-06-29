@@ -2,6 +2,10 @@
 
 A real-time streaming chatbot built on **FastAPI**, **WebSocket**, and **Google Gemini**, with persistent conversation history in **PostgreSQL**. Token-authenticated, origin-checked, rate-limited, observable, tested, and containerized.
 
+**Built with:** FastAPI · WebSocket · Google Gemini · PostgreSQL + pgvector (RAG) · SQLAlchemy + Alembic · JWT auth + RBAC · React (Vite) · Docker Compose · GitHub Actions CI.
+
+It chats with your own PDFs (RAG with sourced answers), authenticates users with JWT, scopes every conversation and document to its owner, and runs end-to-end with one `docker compose up`.
+
 ## Quickstart (Docker)
 
 ```bash
