@@ -23,6 +23,18 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+## Frontend (React + Vite)
+
+A React single-page app lives in `frontend/` (login, streaming chat, PDF upload, source badges, admin stats). Run it against the backend:
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
+```
+
+It talks to the backend at `http://127.0.0.1:8000` (override with `VITE_API_BASE`). The backend's `ALLOWED_ORIGINS` must include the dev origin (`http://localhost:5173`) for CORS and the WebSocket origin check. The legacy single-file Jinja page is still served at `/` as a fallback.
+
 ## Tests
 
 ```bash

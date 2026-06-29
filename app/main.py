@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 
 from app.config import settings
@@ -27,6 +28,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# React dev sunucusu farklı origin'den (5173) REST çağırır → CORS gerekir.
+# allowed_origins (D2 validator'ının yeni müşterisi) hem CORS'u hem WS origin kontrolünü besler.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(web.router)
 app.include_router(ws.router)
 app.include_router(auth.router)
