@@ -13,10 +13,11 @@ Bu, FastAPI + WebSocket + Google Gemini tabanlı bir chatbot öğrenme projesi. 
 - `app/` → mevcut kod
 
 ## Nerede kaldık
-- **Döngü 1–11 BİTTİ** ve commit'li, CI yeşil: D7 PostgreSQL kalıcılık + token-bazlı pencere, D8 Docker+Compose+CI, D9 JWT+kullanıcılar+RBAC, D10 RAG (pgvector + embeddings + PDF), D11 React (Vite) frontend.
-- **Döngü 12 (pazara çıkış)**: yazılı kit hazır → `PAZARA_CIKIS.md`. Gerçek-dünya adımları (profil açma, deploy linkleri, demo video, teklif gönderme, yorum) **kullanıcının** işi.
-- Backend sözleşmeleri: `/auth/register`, `/auth/login` (JWT), `/ws` (JWT'li, RAG'li, `done`'da `sources`), `/documents/upload`, `/admin/stats`, `/metrics`. Frontend: `frontend/` (Vite+React).
-- **Açık teknik işler / sıradaki tur:** canlı Gemini doğrulaması (kota), 3 paketin deploy'u + embed widget + Telegram botu, üçüncü harita (ödeme, multi-tenancy) — pazar verisiyle.
+- **Döngü 1–12 BİTTİ** ve commit'li, CI yeşil: D7 PostgreSQL kalıcılık + token-bazlı pencere, D8 Docker+Compose+CI, D9 JWT+kullanıcılar+RBAC, D10 RAG (pgvector + embeddings + PDF), D11 React (Vite) frontend, D12 pazara çıkış kiti (`PAZARA_CIKIS.md`).
+- **Tek deploy birimi HAZIR ve canlı doğrulandı:** multi-stage Dockerfile React'i derler, FastAPI hem UI'ı hem API/WS'i `:8000`'den (aynı origin, prod'da CORS yok) servis eder → `docker compose up --build` tek komutla tüm sistem.
+- **Döngü 12 gerçek-dünya adımları kullanıcının işi:** profil açma, canlı deploy linki (Railway/Render/VPS — `docker compose` ile), demo video, teklif gönderme, yorum toplama.
+- Backend sözleşmeleri: `/auth/register`, `/auth/login` (JWT), `/ws` (JWT'li, RAG'li, `done`'da `sources`), `/documents/upload`, `/admin/stats`, `/metrics`. Frontend: `frontend/` (Vite+React), prod'da `frontend/dist` FastAPI'den servis edilir.
+- **Açık teknik işler / sıradaki tur:** canlı Gemini doğrulaması (kota), canlı hosting'e deploy (kullanıcı hesabı gerekli), embed widget + Telegram botu, üçüncü harita (ödeme, multi-tenancy) — pazar verisiyle.
 
 ## Ortam
 - Branch: **`claude/vigorous-murdock-60a43a`** (tüm iş burada; `main`'de değil). Fresh clone'da önce: `git checkout claude/vigorous-murdock-60a43a`
