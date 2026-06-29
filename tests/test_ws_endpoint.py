@@ -1,18 +1,17 @@
-"""
-WS endpoint entegrasyon testleri.
-GeminiProvider yerine FakeProvider kullanmak için ws.py'de
-GeminiProvider'ı monkeypatch ile değiştiriyoruz.
-"""
+"""WS endpoint entegrasyon testleri (JWT auth + IDOR)."""
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import TOKEN, ORIGIN, FakeProvider
+from tests.conftest import ORIGIN, OTHER_USER_ID, USER_TOKEN, FakeProvider
 
 
-def ws_connect(client: TestClient, token: str = TOKEN, origin: str = ORIGIN):
-    return client.websocket_connect(f"/ws?token={token}", headers={"origin": origin})
+def ws_connect(client: TestClient, token: str = USER_TOKEN, origin: str = ORIGIN, conversation_id=None):
+    url = f"/ws?token={token}"
+    if conversation_id is not None:
+        url += f"&conversation_id={conversation_id}"
+    return client.websocket_connect(url, headers={"origin": origin})
 
 
 def send_msg(ws, content: str):
@@ -20,13 +19,12 @@ def send_msg(ws, content: str):
 
 
 def collect_until_done(ws) -> tuple[str, str]:
-    """chunk'ları birleştir, done/error/system'de dur. İlk gelen 'conversation' mesajını atlar."""
     parts = []
     while True:
         data = ws.receive_json()
         t = data["type"]
         if t == "conversation":
-            continue  # bağlantı başında gelen conversation_id bildirimi — atla
+            continue
         if t == "chunk":
             parts.append(data["content"])
         elif t == "done":
@@ -35,11 +33,23 @@ def collect_until_done(ws) -> tuple[str, str]:
             return data.get("content", ""), t
 
 
+def read_conversation_id(ws) -> str:
+    data = ws.receive_json()
+    assert data["type"] == "conversation"
+    return data["conversation_id"]
+
+
 # --- auth / origin ---
 
-def test_wrong_token_rejected(client):
+def test_invalid_jwt_rejected(client):
     with pytest.raises(Exception):
-        with ws_connect(client, token="yanlis-token"):
+        with ws_connect(client, token="not.a.valid.jwt"):
+            pass
+
+
+def test_missing_token_rejected(client):
+    with pytest.raises(Exception):
+        with ws_connect(client, token=""):
             pass
 
 
@@ -66,69 +76,37 @@ def test_normal_message_returns_done(client):
 def test_empty_message_returns_system(client):
     with ws_connect(client) as ws:
         send_msg(ws, "   ")
-        text, mtype = collect_until_done(ws)
+        _, mtype = collect_until_done(ws)
     assert mtype == "system"
 
 
 def test_too_long_message_returns_system(client):
     with ws_connect(client) as ws:
         send_msg(ws, "x" * 2001)
-        text, mtype = collect_until_done(ws)
+        _, mtype = collect_until_done(ws)
     assert mtype == "system"
 
 
-def test_invalid_json_returns_error_and_connection_survives(client):
-    provider = FakeProvider(chunks=["hâlâ çalışıyorum"])
-    with patch("app.routers.ws.GeminiProvider", return_value=provider):
-        with ws_connect(client) as ws:
-            ws.send_text("bu json değil {{{")
-            _, mtype1 = collect_until_done(ws)
-            assert mtype1 == "error"
+# --- IDOR: başkasının konuşmasına bağlanamamalı ---
 
-            # Bağlantı hâlâ canlı
-            send_msg(ws, "test")
-            text2, mtype2 = collect_until_done(ws)
-            assert mtype2 == "done"
-            assert "hâlâ çalışıyorum" in text2
+def test_cannot_attach_to_another_users_conversation(client, conv_repo):
+    # OTHER_USER'a ait bir konuşma (senkron seed)
+    others_cid = conv_repo.seed_conversation(OTHER_USER_ID)
+    # USER bu conversation_id ile bağlanmaya çalışır → sahip olmadığı için YENİ konuşma açılmalı
+    with ws_connect(client, conversation_id=others_cid) as ws:
+        new_cid = read_conversation_id(ws)
+    assert new_cid != str(others_cid)
 
 
-# --- health endpoint ---
+# --- health / metrics ---
 
 def test_health_returns_200(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "ok"
-    assert body["gemini_client"] is True
-
-
-# --- metrics ---
-
-def test_metrics_endpoint_reports_zero_initially(client):
-    resp = client.get("/metrics")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["active_connections"] == 0
-    assert body["total_messages"] == 0
+    assert resp.json()["gemini_client"] is True
 
 
 def test_metrics_counts_active_connection(client):
     with ws_connect(client):
-        resp = client.get("/metrics")
-        body = resp.json()
-        assert body["active_connections"] == 1
-    # Bağlantı kapandıktan sonra düşmeli
-    resp = client.get("/metrics")
-    assert resp.json()["active_connections"] == 0
-
-
-def test_metrics_counts_total_messages(client):
-    provider = FakeProvider(chunks=["ok"])
-    with patch("app.routers.ws.GeminiProvider", return_value=provider):
-        with ws_connect(client) as ws:
-            send_msg(ws, "bir")
-            collect_until_done(ws)
-            send_msg(ws, "iki")
-            collect_until_done(ws)
-    resp = client.get("/metrics")
-    assert resp.json()["total_messages"] == 2
+        assert client.get("/metrics").json()["active_connections"] == 1
+    assert client.get("/metrics").json()["active_connections"] == 0

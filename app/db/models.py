@@ -9,11 +9,14 @@ from app.db.base import Base
 
 
 class User(Base):
-    """Şimdilik iskelet — gerçek kimlik (kayıt, parola, rol) Döngü 9'da gelecek."""
+    """Gerçek kimlik: email + hash'lenmiş parola + rol (D9)."""
 
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="user")  # "user" | "admin"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -23,6 +26,10 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Sahibi. Eski (D7) konuşmalarda boş olabilir; yeni konuşmalar hep bir kullanıcıya bağlı.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # 1 konuşma — N mesaj. order_by ile geçmiş hep kronolojik gelir.

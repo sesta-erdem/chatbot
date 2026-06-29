@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     allowed_origins: list[str]
     history_token_budget: int = 4000  # modele giden bağlamın maksimum token bütçesi
     database_url: str
+    jwt_secret: str
+    # Uzun-ömürlü WebSocket: token handshake'te doğrulanır, bağlantı boyunca tekrar
+    # kontrol edilmez. Bu yüzden makul uzun bir süre (7 gün) seçiyoruz.
+    jwt_expire_minutes: int = 60 * 24 * 7
 
     @field_validator("gemini_api_key", mode="after")
     @classmethod
@@ -51,6 +55,13 @@ class Settings(BaseSettings):
     def app_access_token_validator(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("app_access_token is empty")
+        return value
+
+    @field_validator("jwt_secret", mode="after")
+    @classmethod
+    def jwt_secret_validator(cls, value: str) -> str:
+        if len(value.strip()) < 16:
+            raise ValueError("jwt_secret en az 16 karakter olmalı (imza güvenliği)")
         return value
 
     @field_validator("allowed_origins", mode="before")

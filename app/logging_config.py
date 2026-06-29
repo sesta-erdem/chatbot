@@ -13,4 +13,5 @@ def setup_logging() -> None:
 class ConnectionLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         connection_id = self.extra.get("connection_id", "-")
-        return f"{connection_id}: {msg}", kwargs
+        user_id = self.extra.get("user_id", "-")
+        return f"[user={user_id} conn={connection_id}] {msg}", kwargs

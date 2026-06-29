@@ -378,22 +378,43 @@
     let activeBubble = null;
 
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const tokenStorageKey = "chat_access_token";
-    let accessToken = (window.sessionStorage.getItem(tokenStorageKey) || "").trim();
-    if (!accessToken) {
-        accessToken = (window.prompt("Access token") || "").trim();
-        if (accessToken) {
-            window.sessionStorage.setItem(tokenStorageKey, accessToken);
-        }
-    }
+    const jwtStorageKey = "chat_jwt";
     const conversationStorageKey = "chat_conversation_id";
-    const wsUrl = new URL(proto + "://" + window.location.host + "/ws");
-    wsUrl.searchParams.set("token", accessToken);
-    const savedConversation = window.sessionStorage.getItem(conversationStorageKey);
-    if (savedConversation) {
-        wsUrl.searchParams.set("conversation_id", savedConversation);
+    let ws;
+
+    async function ensureToken() {
+        let jwt = (window.sessionStorage.getItem(jwtStorageKey) || "").trim();
+        if (jwt) return jwt;
+        const email = (window.prompt("E-posta") || "").trim();
+        const password = window.prompt("Parola (en az 8 karakter)") || "";
+        // Önce giriş dene; kullanıcı yoksa kayıt ol.
+        for (const path of ["/auth/login", "/auth/register"]) {
+            const r = await fetch(path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            if (r.ok) {
+                jwt = (await r.json()).access_token;
+                window.sessionStorage.setItem(jwtStorageKey, jwt);
+                return jwt;
+            }
+        }
+        window.alert("Giriş/kayıt başarısız. Sayfayı yenileyip tekrar deneyin.");
+        throw new Error("auth failed");
     }
-    const ws = new WebSocket(wsUrl.toString());
+
+    (async () => {
+        const jwt = await ensureToken();
+        const wsUrl = new URL(proto + "://" + window.location.host + "/ws");
+        wsUrl.searchParams.set("token", jwt);
+        const savedConversation = window.sessionStorage.getItem(conversationStorageKey);
+        if (savedConversation) {
+            wsUrl.searchParams.set("conversation_id", savedConversation);
+        }
+        ws = new WebSocket(wsUrl.toString());
+        attachHandlers();
+    })();
 
     function setStatus(state) {
         dot.className = 'dot ' + state;
@@ -401,6 +422,7 @@
         statusLabel.textContent = labels[state] || 'bağlanıyor';
     }
 
+    function attachHandlers() {
     ws.onopen = () => {
         setStatus('on');
         input.disabled = false;
@@ -453,6 +475,7 @@
             appendBubble(msg.content, 'in', true);
         }
     };
+    }
 
     function createBubble(dir, isError = false) {
         const row = document.createElement('div');

@@ -1,4 +1,3 @@
-import time
 import uuid
 from typing import AsyncIterator
 
@@ -7,13 +6,6 @@ from google.genai import types
 from app.db.models import Message
 from app.db.repository import ConversationRepository
 from app.services.llm_provider import LLMProvider
-
-RATE_LIMIT_WINDOW = 10.0
-RATE_LIMIT_MAX_MESSAGES = 5
-
-
-class RateLimitExceeded(Exception):
-    pass
 
 
 def estimate_tokens(text: str) -> int:
@@ -41,14 +33,6 @@ class ChatService:
         self._budget = history_token_budget
         self._repo = repo
         self._conversation_id = conversation_id
-        self._timestamps: list[float] = []
-
-    def check_rate_limit(self) -> None:
-        now = time.monotonic()
-        self._timestamps = [t for t in self._timestamps if t > now - RATE_LIMIT_WINDOW]
-        if len(self._timestamps) >= RATE_LIMIT_MAX_MESSAGES:
-            raise RateLimitExceeded(f"pencerede {len(self._timestamps)} mesaj")
-        self._timestamps.append(now)
 
     async def _windowed_messages(self) -> list[Message]:
         """DB'deki tam geçmişten, token bütçesine sığan en yeni mesajları seç (kronolojik döner)."""

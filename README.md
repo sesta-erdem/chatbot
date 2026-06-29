@@ -37,7 +37,8 @@ Tests never call the real Gemini API or a real database — they use a `FakeProv
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GEMINI_API_KEY` | yes | — | Google Gemini API key |
-| `APP_ACCESS_TOKEN` | yes | — | Shared token clients must present to connect |
+| `APP_ACCESS_TOKEN` | yes | — | Legacy shared token (kept for config compatibility) |
+| `JWT_SECRET` | yes | — | Secret for signing JWTs (min 16 chars) |
 | `DATABASE_URL` | yes | — | Must use the async driver: `postgresql+asyncpg://...` |
 | `ALLOWED_ORIGINS` | yes | — | JSON list of allowed WebSocket origins |
 | `GEMINI_MODEL` | no | `gemini-2.5-flash` | Model id |
@@ -85,9 +86,16 @@ Layers, each with a single responsibility:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | Chat UI |
+| POST | `/auth/register` | Create account, returns a JWT |
+| POST | `/auth/login` | Authenticate, returns a JWT |
 | GET | `/health` | Liveness probe |
 | GET | `/metrics` | `active_connections`, `total_messages` |
-| WS | `/ws?token=...&conversation_id=...` | Streaming chat |
+| GET | `/admin/stats` | Admin-only stats (role `admin`) |
+| WS | `/ws?token=<jwt>&conversation_id=...` | Streaming chat (JWT-authenticated) |
+
+## Authentication
+
+Clients register or log in over HTTP to obtain a signed **JWT**, then present it on the WebSocket handshake (`?token=<jwt>`). The server resolves the user from the token, scopes conversations to their owner (no cross-user access — IDOR-protected), rate-limits per user, and gates admin endpoints behind a role check. Passwords are stored as bcrypt hashes; JWTs are signed (not encrypted), so no secrets go in the payload.
 
 ## CI
 

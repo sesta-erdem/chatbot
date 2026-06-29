@@ -3,13 +3,12 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter
-from fastapi import WebSocket
+from fastapi import APIRouter, WebSocket
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
-from app.db.repository import ConversationRepository
+from app.db.repository import ConversationRepository, UserRepository
 from app.logging_config import ConnectionLoggerAdapter
 from app.schemas.messages import (
     ChunkMessage,
@@ -19,8 +18,10 @@ from app.schemas.messages import (
     SystemMessage,
     UserMessage,
 )
-from app.services.chat_service import ChatService, RateLimitExceeded
+from app.services.auth import TokenError, decode_token
+from app.services.chat_service import ChatService
 from app.services.llm_provider import GeminiProvider
+from app.services.rate_limit import RateLimitExceeded
 from google.genai.errors import ClientError, ServerError
 
 IDLE_TIMEOUT = 30.0
@@ -29,19 +30,36 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def resolve_conversation(websocket, repo, ws_logger) -> uuid.UUID:
-    """conversation_id query'den gelirse ve geçerliyse onu kullan; yoksa yeni konuşma aç ve id'yi bildir."""
+async def authenticate(websocket: WebSocket) -> uuid.UUID | None:
+    """Query'deki JWT'yi çöz, kullanıcıyı doğrula. Başarısızsa None döner (çağıran 1008 ile kapatır).
+    Tarayıcı WebSocket'e header koyamadığı için token query'de taşınır (D3 kararı); değişen,
+    statik sır yerine imzalı JWT olması."""
+    token = websocket.query_params.get("token", "")
+    try:
+        payload = decode_token(token)
+        user_id = uuid.UUID(payload["sub"])
+    except (TokenError, KeyError, ValueError):
+        return None
+    if await UserRepository().get_by_id(user_id) is None:
+        return None
+    return user_id
+
+
+async def resolve_conversation(websocket, repo, user_id, ws_logger) -> uuid.UUID:
+    """conversation_id verilmişse ve KULLANICIYA AİTSE onu kullan (IDOR koruması);
+    aksi halde yeni konuşma aç ve id'yi bildir."""
     raw = websocket.query_params.get("conversation_id")
     if raw:
         try:
             cid = uuid.UUID(raw)
         except ValueError:
             cid = None
-        if cid and await repo.exists(cid):
+        if cid and await repo.belongs_to(cid, user_id):
             ws_logger.info("Mevcut konuşma yüklendi")
             return cid
+        ws_logger.warning("Sahip olmadığı/geçersiz conversation_id istendi — yeni konuşma açılıyor")
 
-    cid = await repo.create_conversation()
+    cid = await repo.create_conversation(user_id)
     await websocket.send_json(ConversationMessage(conversation_id=str(cid)).model_dump())
     ws_logger.info("Yeni konuşma açıldı")
     return cid
@@ -55,25 +73,26 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    access_token = websocket.query_params.get("token")
-    if access_token != settings.app_access_token:
-        logger.warning("Kullanıcı yanlış token ile bağlandı")
+    user_id = await authenticate(websocket)
+    if user_id is None:
+        logger.warning("Geçersiz/eksik JWT ile bağlanma denemesi")
         await websocket.close(code=1008)
         return
 
     await websocket.accept()
 
     connection_id = str(uuid.uuid4())
-    ws_logger = ConnectionLoggerAdapter(logger, {"connection_id": connection_id})
+    ws_logger = ConnectionLoggerAdapter(
+        logger, {"connection_id": connection_id, "user_id": str(user_id)}
+    )
 
     genai_client = websocket.app.state.genai_client
     manager = websocket.app.state.connection_manager
+    rate_limiter = websocket.app.state.rate_limiter
     provider = GeminiProvider(client=genai_client, model=settings.gemini_model)
     repo = ConversationRepository()
 
-    # conversation_id: istemciden gelirse (reconnect) onu kullan, yoksa yeni konuşma aç.
-    # connection_id her bağlantıda yeni (geçici); conversation_id kalıcı (geçmişin anahtarı).
-    conversation_id = await resolve_conversation(websocket, repo, ws_logger)
+    conversation_id = await resolve_conversation(websocket, repo, user_id, ws_logger)
 
     service = ChatService(
         provider=provider,
@@ -111,8 +130,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 ws_logger.warning("Karakter uyumsuzluğu")
                 continue
 
+            # Rate limit KULLANICI başına (iki sekme limiti ikiye katlamaz)
             try:
-                service.check_rate_limit()
+                rate_limiter.check(str(user_id))
             except RateLimitExceeded as exc:
                 await websocket.send_json(
                     SystemMessage(content="Çok hızlı mesaj gönderiyorsun, biraz yavaşla.").model_dump()

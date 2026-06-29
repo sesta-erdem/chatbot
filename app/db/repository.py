@@ -3,7 +3,27 @@ import uuid
 from sqlalchemy import select
 
 from app.db.base import async_session
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Message, User
+
+
+class UserRepository:
+    """Kullanıcı kayıt/okuma. Parolayı burada değil, çağrıdan önce hash'lenmiş alır."""
+
+    async def create_user(self, email: str, password_hash: str, role: str = "user") -> User:
+        async with async_session() as session:
+            user = User(email=email, password_hash=password_hash, role=role)
+            session.add(user)
+            await session.commit()
+            return user
+
+    async def get_by_email(self, email: str) -> User | None:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.email == email))
+            return result.scalar_one_or_none()
+
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
+        async with async_session() as session:
+            return await session.get(User, user_id)
 
 
 class ConversationRepository:
@@ -16,16 +36,18 @@ class ConversationRepository:
     uzun-ömürlü session risklerini (kopuk bağlantı, lazy-load patlaması) önler.
     """
 
-    async def create_conversation(self) -> uuid.UUID:
+    async def create_conversation(self, user_id: uuid.UUID) -> uuid.UUID:
         async with async_session() as session:
-            conversation = Conversation()
+            conversation = Conversation(user_id=user_id)
             session.add(conversation)
             await session.commit()
             return conversation.id
 
-    async def exists(self, conversation_id: uuid.UUID) -> bool:
+    async def belongs_to(self, conversation_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """IDOR koruması: konuşma var VE bu kullanıcıya ait mi?"""
         async with async_session() as session:
-            return await session.get(Conversation, conversation_id) is not None
+            conversation = await session.get(Conversation, conversation_id)
+            return conversation is not None and conversation.user_id == user_id
 
     async def append_message(
         self,
