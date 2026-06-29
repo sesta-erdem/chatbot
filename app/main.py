@@ -1,8 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from google import genai
 
 from app.config import settings
@@ -44,3 +46,9 @@ app.include_router(ws.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(documents.router)
+
+# Prod: derlenmiş React'in statik asset'leri (index.html'i web.router servis ediyor).
+# Router'lardan SONRA mount edilir ki /auth, /ws gibi API yolları gölgelenmesin.
+_assets = Path("frontend/dist/assets")
+if _assets.exists():
+    app.mount("/assets", StaticFiles(directory=str(_assets)), name="assets")

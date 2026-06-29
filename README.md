@@ -11,11 +11,11 @@ It chats with your own PDFs (RAG with sourced answers), authenticates users with
 ```bash
 git clone <repo-url>
 cd <repo>
-cp .env.example .env        # fill in GEMINI_API_KEY and APP_ACCESS_TOKEN
+cp .env.example .env        # fill in GEMINI_API_KEY, APP_ACCESS_TOKEN, JWT_SECRET
 docker compose up --build
 ```
 
-This starts PostgreSQL, applies database migrations, and launches the app at <http://127.0.0.1:8000>. Open it, paste your access token, and chat. Reload the page — the bot remembers the conversation (history is restored from PostgreSQL).
+One command builds the React frontend, starts PostgreSQL (with pgvector), applies migrations, and serves **everything** — API, WebSocket, and the React UI — from a single container at <http://127.0.0.1:8000> (same origin, no CORS in prod). Open it, register or log in, chat, and upload a PDF to chat with your documents. Reload the page — the conversation is restored from PostgreSQL.
 
 ## Run locally (without Docker)
 
@@ -37,7 +37,7 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-It talks to the backend at `http://127.0.0.1:8000` (override with `VITE_API_BASE`). The backend's `ALLOWED_ORIGINS` must include the dev origin (`http://localhost:5173`) for CORS and the WebSocket origin check. The legacy single-file Jinja page is still served at `/` as a fallback.
+In dev the SPA runs on `5173` and talks to the backend on `8000` (`frontend/.env.development` sets `VITE_API_BASE`); `ALLOWED_ORIGINS` must include `http://localhost:5173` for CORS and the WebSocket origin check. In **production** there is no separate dev server: the multi-stage Docker build compiles the SPA and the backend serves it from `frontend/dist` at `/` (and `/assets`), same origin, no CORS. The legacy single-file Jinja page is only a fallback when `frontend/dist` is absent.
 
 ## Tests
 

@@ -22,6 +22,7 @@ services:
       # Secret'lar host .env'inden interpolate edilir (imaja girmez).
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       APP_ACCESS_TOKEN: ${APP_ACCESS_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       HISTORY_TOKEN_BUDGET: ${HISTORY_TOKEN_BUDGET:-4000}

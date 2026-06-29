@@ -11,3 +11,5 @@ tests/
 *.md
 preview.html
 main_yedek_temel.py
+frontend/node_modules/
+frontend/dist/

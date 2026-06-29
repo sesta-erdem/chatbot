@@ -1,5 +1,11 @@
-// Tüm REST + WS adresleri tek yerde. VITE_API_BASE ile override edilebilir.
-export const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+// Tüm REST + WS adresleri tek yerde.
+// Prod: aynı origin (FastAPI derlenmiş SPA'yı servis eder → CORS yok).
+// Dev: frontend/.env içindeki VITE_API_BASE (http://127.0.0.1:8000) kullanılır.
+export const API_BASE = import.meta.env.VITE_API_BASE || ''
+
+function httpBase() {
+  return API_BASE || window.location.origin
+}
 
 async function authRequest(path, email, password) {
   const r = await fetch(API_BASE + path, {
@@ -37,7 +43,7 @@ export async function getAdminStats(token) {
 }
 
 export function wsUrl(token, conversationId) {
-  const base = API_BASE.replace(/^http/, 'ws')
+  const base = httpBase().replace(/^http/, 'ws')
   let url = `${base}/ws?token=${encodeURIComponent(token)}`
   if (conversationId) url += `&conversation_id=${encodeURIComponent(conversationId)}`
   return url

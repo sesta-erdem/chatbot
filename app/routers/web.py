@@ -1,13 +1,21 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
+# Prod'da (Docker build) derlenmiş React buraya kopyalanır; varsa onu servis ederiz.
+SPA_INDEX = Path("frontend/dist/index.html")
+
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    if SPA_INDEX.exists():
+        return FileResponse(SPA_INDEX)
+    # Dev/fallback: tek dosya Jinja sayfası (React ayrı 5173'te çalışıyorsa burası kullanılmaz)
     return templates.TemplateResponse(request=request, name="chat.html")
 
 
