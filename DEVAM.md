@@ -8,7 +8,8 @@ Bu, FastAPI + WebSocket + Google Gemini tabanlı bir chatbot öğrenme projesi. 
 
 ## Önce şunları oku (repo kökünde)
 - `README.md` → mimari + quickstart + kararlar
-- `yolharitasi-2-dongu-7-12.md` → Döngü 7–12 spec'leri (asıl referans)
+- `yolharitasi-3-ingiltere.md` → **GÜNCEL plan**: UK pazar analizine göre öğrenme (tersine müh. D5→12) + inşa (B1-B5: 2. sağlayıcı, evals, AWS, agents, TS) rayları + 12 aylık takvim
+- `yolharitasi-2-dongu-7-12.md` → Döngü 7–12 spec'leri (referans)
 - `KOD_REHBERI.md` → dosya dosya "neyin neden yazıldığı"
 - `app/` → mevcut kod
 
