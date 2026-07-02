@@ -35,7 +35,9 @@ async def upload(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Metin çıkarılamadı (taranmış PDF olabilir)")
 
     # Embedding (batch) — sorgu ve doküman aynı modelden
-    embedder = GeminiEmbeddingProvider(request.app.state.genai_client, settings.embedding_model)
+    embedder = GeminiEmbeddingProvider(
+        request.app.state.genai_client, settings.embedding_model, dim=settings.embedding_dim
+    )
     embeddings = await embedder.embed([content for _, content in items])
 
     repo = DocumentRepository()

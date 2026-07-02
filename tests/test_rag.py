@@ -84,3 +84,32 @@ async def test_rag_no_documents_plain_prompt():
 
     assert provider.last_message == "merhaba"
     assert service.last_sources == []
+
+
+class BrokenEmbedder:
+    """Embedding API'sinin çöktüğü senaryo (ör. model 404, kota, ağ)."""
+
+    async def embed(self, texts):
+        raise RuntimeError("embedding API down")
+
+
+async def test_rag_failure_does_not_kill_chat():
+    # RAG zenginleştirmedir: embedder çökerse sohbet BAĞLAMSIZ devam etmeli.
+    provider = FakeProvider(chunks=["cevap"])
+    repo = FakeConversationRepository()
+    cid = await repo.create_conversation(TEST_USER_ID)
+    service = ChatService(
+        provider=provider,
+        history_token_budget=4000,
+        repo=repo,
+        conversation_id=cid,
+        embedder=BrokenEmbedder(),
+        doc_repo=FakeDocumentRepository(hits=[]),
+        user_id=TEST_USER_ID,
+    )
+
+    result = await collect(service, "merhaba")
+
+    assert result == "cevap"                    # yanıt aktı
+    assert provider.last_message == "merhaba"   # ham soru gitti (bağlamsız)
+    assert service.last_sources == []

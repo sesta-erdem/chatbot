@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import AsyncIterator
 
@@ -7,6 +8,8 @@ from app.db.models import Message
 from app.db.repository import ConversationRepository, DocumentRepository
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm_provider import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 RAG_INSTRUCTION = (
     "Aşağıdaki PASAJLARA dayanarak cevap ver. Cevap pasajlarda yoksa uydurma; "
@@ -93,7 +96,13 @@ class ChatService:
         windowed = await self._windowed_history()
         self.last_sources = []
 
-        context, sources = await self._retrieve(message)
+        # RAG bir ZENGİNLEŞTİRME'dir, ön koşul değil: retrieval (embedding API,
+        # vektör arama) çökerse sohbeti öldürme — logla ve bağlamsız devam et.
+        try:
+            context, sources = await self._retrieve(message)
+        except Exception:
+            logger.warning("RAG retrieval başarısız — bağlamsız devam ediliyor", exc_info=True)
+            context, sources = "", []
         if context:
             self.last_sources = sources
             prompt = f"{RAG_INSTRUCTION}\n\n[PASAJLAR]\n{context}\n\n[SORU]\n{message}"

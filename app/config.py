@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 24 * 7
 
     # RAG ayarları
-    embedding_model: str = "text-embedding-004"
+    # gemini-embedding-001: güncel model (text-embedding-004 API'den kaldırıldı → 404).
+    # Varsayılan çıktısı 3072 boyut; DB şeması Vector(768) olduğundan embed çağrısında
+    # output_dimensionality=embedding_dim ile 768 istenir.
+    embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768
     chunk_size: int = 1000           # karakter (kaba); deney günlüğüyle ayarlanır
     chunk_overlap: int = 200

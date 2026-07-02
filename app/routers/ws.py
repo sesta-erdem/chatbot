@@ -91,7 +91,9 @@ async def websocket_endpoint(websocket: WebSocket):
     manager = websocket.app.state.connection_manager
     rate_limiter = websocket.app.state.rate_limiter
     provider = GeminiProvider(client=genai_client, model=settings.gemini_model)
-    embedder = GeminiEmbeddingProvider(client=genai_client, model=settings.embedding_model)
+    embedder = GeminiEmbeddingProvider(
+        client=genai_client, model=settings.embedding_model, dim=settings.embedding_dim
+    )
     repo = ConversationRepository()
     doc_repo = DocumentRepository()
 
